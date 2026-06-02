@@ -29,40 +29,59 @@ def get_windows_username():
 
 
 def find_mlx_directories():
-    """Find all possible MLX log locations on Windows."""
+    """Find MLX log directories only (not profile/browser data)."""
     user_home = Path.home()
     candidates = [
         user_home / "mlx" / "logs",
-        user_home / "mlx",
         user_home / ".multilogin" / "logs",
         user_home / "AppData" / "Local" / "Multilogin X" / "logs",
         user_home / "AppData" / "Roaming" / "Multilogin X" / "logs",
-        user_home / "AppData" / "Local" / "Multilogin X",
-        user_home / "AppData" / "Roaming" / "Multilogin X",
     ]
     for drive in ["C:", "D:", "E:"]:
         candidates.append(Path(drive) / "mlx" / "logs")
-        candidates.append(Path(drive) / "mlx")
 
     found = []
     for p in candidates:
         if p.exists() and p.is_dir():
             found.append(p)
+
+    if not found:
+        broader = [
+            user_home / "mlx",
+            user_home / "AppData" / "Local" / "Multilogin X",
+            user_home / "AppData" / "Roaming" / "Multilogin X",
+        ]
+        for drive in ["C:", "D:", "E:"]:
+            broader.append(Path(drive) / "mlx")
+        for p in broader:
+            logs_sub = p / "logs"
+            if logs_sub.exists() and logs_sub.is_dir():
+                found.append(logs_sub)
+            elif p.exists() and p.is_dir():
+                found.append(p)
+                break
+
     return found
 
 
 def collect_log_files(mlx_dirs):
-    """Collect all log files from MLX directories."""
-    log_extensions = {".log", ".json", ".txt", ".csv"}
+    """Collect only actual log files, skip profile/browser data."""
+    log_patterns = {"desktop_", "launcher_", "agent_", "mimic_", "machine_info"}
+    log_extensions = {".log"}
     files = []
     for d in mlx_dirs:
         for root, dirs, filenames in os.walk(str(d)):
+            skip_dirs = {"profiles", "cache", "extensions", "browser", "deps", "chromium"}
+            dirs[:] = [x for x in dirs if x.lower() not in skip_dirs]
             for fname in filenames:
                 fpath = Path(root) / fname
-                if fpath.suffix.lower() in log_extensions or "log" in fname.lower() or "machine_info" in fname.lower():
+                is_log = fpath.suffix.lower() in log_extensions
+                is_machine_info = fname.startswith("machine_info") and fname.endswith(".json")
+                is_named_log = any(fname.startswith(p) for p in log_patterns)
+                if is_log or is_machine_info or is_named_log:
                     try:
                         size = fpath.stat().st_size
-                        if size < 100 * 1024 * 1024:  # skip files > 100MB
+                        if size < 50 * 1024 * 1024:
                             files.append(fpath)
                     except OSError:
                         pass
